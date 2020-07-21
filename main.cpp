@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <windows.h>
 #include <time.h>
+#include <thread>
 
 using namespace std;
 
@@ -13,44 +14,31 @@ using namespace std;
 
 const int popsize=1000;
 const float elitism=0.15;
-const float mutation=0.05;
-const int trials=50000;
+const float mutation=0.005;
+int trials=100000;
 
 const int shoesize=4; //keep as 4 ALWAYS!!!
 
 int cards[]={1,2,3,4,5,6,7,8,9,10,10,10,10};
 
 const int decklen=52*shoesize;
-int deck[decklen];
-int counter=0;
-
-random_device rd2;
-mt19937 rng2(rd2());
-uniform_int_distribution<int> uni2(0,decklen);
 
 HANDLE hConsole;
 
-int colours[]={160,192,176,224};
+random_device rd;
+seed_seq seed{rd(),rd(),rd(),rd(),rd(),rd(),rd(),rd()};
+mt19937 rng(seed);
 
-void shuffle_array(int arr[], int len) {
-    int temp=0;
-    int r=0;
-    for(int i=len-1; i>0; i--) {
-        r=rand()%(i+1);
-        temp=arr[i];
-        arr[i]=arr[r];
-        arr[r]=temp;
-    }
-}
+int colours[]={160,192,176,224};
 
 class Chromosome {
 public:
-    int _hard[160][4];
-    int _soft[80][4];
-    int _pairs[90][4];
-    int _acepairs[10][4];
+    int _hard[160][4]={};
+    int _soft[80][4]={};
+    int _pairs[90][4]={};
+    int _acepairs[10][4]={};
 
-    double bet=1;
+    double bet=1.;
 
     double _fitness=0;
 
@@ -64,25 +52,34 @@ public:
 };
 
 double Chromosome::test(int runs) {
+
+    int deck[decklen];
+    int counter=0;
+
+    for (int i=0;i<decklen;i++)
+    {
+        deck[i]=cards[i%13];
+    }
+    shuffle(begin(deck),end(deck),rng);
+
     double money=0;
     int totalhands=0;
 
     const int handlen=18;
     int dpos=0;
-    int dealerscore;
-    int dealercard;
+    int dealerscore=0;
+    int dealercard=0;
     bool dealerace=false;
+    bool dealerblackjack=false;
 
     int hands[16*shoesize][handlen]={};
     int hpos[16*shoesize]={};
-    int scores[16*shoesize]={};
-    bool isace[16*shoesize]={};
-    int card;
+    int card=0;
 
     int hand=0;
-    int handscore;
+    int handscore=0;
     int action[4]={};
-    bool isacepair;
+    bool isacepair=false;
     int handcounter=1;
     int temp=0;
 
@@ -90,7 +87,7 @@ double Chromosome::test(int runs) {
 
     for (int run=0; run<runs; run++) {
         if (counter>(decklen/2)) {
-            shuffle_array(deck,decklen);
+            shuffle(begin(deck),end(deck),rng);
             counter=0;
         }
 
@@ -101,28 +98,29 @@ double Chromosome::test(int runs) {
         dpos=0;
         dealerscore=0;
         dealerace=false;
-
-        hpos[0]=0;
+        dealerblackjack=false;
 
         while (dealerscore<17) {
-            //card=getcard(deck,decklen);
             card=deck[counter];
             counter=(counter+1)%decklen;
             dealer[dpos]=card;
             dpos=dpos+1;
             dealerscore+=card;
             if (card==1) {dealerace=true;}
-            if (dealerace && dealerscore>7)
+            if (dealerace && dealerscore>7 && dealerscore<12)
             {
                 break;
             }
         }
         if (dealerace && dealerscore<12) {dealerscore+=10;}
         dealercard=dealer[0];
+        if (dealerace && dealerscore==21 && dpos==2)
+        {
+            dealerblackjack=true;
+        }
 
         //get first 2 cards.
         for (int i=0; i<2; i++) {
-            //card=getcard(deck,decklen);
             card=deck[counter];
             counter=(counter+1)%decklen;
             hands[0][i]=card;
@@ -134,14 +132,6 @@ double Chromosome::test(int runs) {
             if (dealerscore!=21 || dpos!=2) {
                 money=money+bet*1.5;
             }
-            totalhands=totalhands+1;
-            hands[0][0]=0;
-            hands[0][1]=0;
-            hpos[0]=0;
-            continue;
-        }
-        else if (dealerscore==21 && dpos==2) {
-            money=money-bet;
             totalhands=totalhands+1;
             hands[0][0]=0;
             hands[0][1]=0;
@@ -206,25 +196,33 @@ double Chromosome::test(int runs) {
 
                 if (handscore>21) {
                     money=money-bet;
-                    totalhands=totalhands+1;
 
                     //reset hand slot.
                     for (int i=0;i<hpos[hand];i++)
                     {
                         hands[hand][i]=0;
                     }
+                    totalhands=totalhands+1;
                     hpos[hand]=0;
                     handcounter-=1;
                     continue;
                 }
                 else if (handscore==21)
                 {
-                    if (dealerscore!=21) {money+=bet;}
-                    totalhands+=1;
+                    if (dealerblackjack)
+                    {
+                        money-=bet;
+                    }
+                    else if (!dealerblackjack && dealerscore!=21)
+                    {
+                        money+=bet;
+                    }
+
                     for (int i=0;i<hpos[hand];i++)
                     {
                         hands[hand][i]=0;
                     }
+                    totalhands+=1;
                     hpos[hand]=0;
                     handcounter-=1;
                     continue;
@@ -235,6 +233,19 @@ double Chromosome::test(int runs) {
             }
             else if (action[1]==1) {
                 //stand.
+                if (dealerblackjack)
+                {
+                    money-=bet;
+                    totalhands+=1;
+                    for (int i=0;i<hpos[hand];i++)
+                    {
+                        hands[hand][i]=0;
+                    }
+                    hpos[hand]=0;
+                    handcounter-=1;
+                    continue;
+                }
+
                 if (dealerscore<22) {
                     if (dealerscore<handscore) {
                         money=money+bet;
@@ -265,6 +276,19 @@ double Chromosome::test(int runs) {
                 hands[hand][hpos[hand]]=card;
                 hpos[hand]=hpos[hand]+1;
                 handscore=score(hands[hand],hpos[hand]);
+
+                if (dealerblackjack)
+                {
+                    money-=2.*bet;
+                    totalhands+=1;
+                    for (int i=0;i<hpos[hand];i++)
+                    {
+                        hands[hand][i]=0;
+                    }
+                    hpos[hand]=0;
+                    handcounter-=1;
+                    continue;
+                }
 
                 if (handscore>21)
                 {
@@ -303,6 +327,12 @@ double Chromosome::test(int runs) {
                     //split aces.
                     for (int i=0; i<2; i++) {
                         //card=getcard(deck,decklen);
+                        if (dealerblackjack)
+                        {
+                            money-=bet;
+                            totalhands+=1;
+                            continue;
+                        }
                         card=deck[counter];
                         counter=(counter+1)%decklen;
                         if (dealerscore<22) {
@@ -336,21 +366,18 @@ double Chromosome::test(int runs) {
                     counter=(counter+1)%decklen;
                     hands[hand][1]=card;
                     handscore=score(hands[hand],hpos[hand]);
-                    if (handscore>21)
+                    if (handscore==21)
                     {
-                        totalhands=+1;
-                        money-=bet;
-                        for (int i=0;i<hpos[hand];i++)
+                        if (dealerblackjack)
                         {
-                            hands[hand][i]=0;
+                            money-=bet;
                         }
-                        hpos[hand]=0;
-                        handcounter-=1;
-                    }
-                    else if (handscore==21)
-                    {
+                        else if (!dealerblackjack && dealerscore!=21)
+                        {
+                            money+=bet;
+                        }
+
                         totalhands+=1;
-                        if (dealerscore!=21) {money+=bet;}
                         for (int i=0;i<hpos[hand];i++)
                         {
                             hands[hand][i]=0;
@@ -369,28 +396,24 @@ double Chromosome::test(int runs) {
                         }
                     }
                     hands[hand][0]=card;
-                    //card=getcard(deck,decklen);
                     card=deck[counter];
                     counter=(counter+1)%decklen;
                     hands[hand][1]=card;
                     hpos[hand]=2;
                     handcounter+=1;
                     handscore=score(hands[hand],hpos[hand]);
-                    if (handscore>21)
+                    if (handscore==21)
                     {
-                        totalhands+=1;
-                        money-=bet;
-                        for (int i=0;i<hpos[hand];i++)
+                        if (dealerblackjack)
                         {
-                            hands[hand][i]=0;
+                            money-=bet;
                         }
-                        hpos[hand]=0;
-                        handcounter-=1;
-                    }
-                    else if (handscore==21)
-                    {
+                        else if (!dealerblackjack && dealerscore!=21)
+                        {
+                            money+=bet;
+                        }
+
                         totalhands+=1;
-                        if (dealerscore!=21) {money+=bet;}
                         for (int i=0;i<hpos[hand];i++)
                         {
                             hands[hand][i]=0;
@@ -403,20 +426,22 @@ double Chromosome::test(int runs) {
             }
         }
     }
-    return 10000*money/totalhands;
+    return 100*money/totalhands;
 }
 
 void Chromosome::populate() {
     int a[]={1,0,0};
     for (int i=0; i<160; i++) {
-        shuffle_array(a,3);
+        //shuffle_array(a,3);
+        shuffle(begin(a),end(a),rng);
         _hard[i][0]=a[0];
         _hard[i][1]=a[1];
         _hard[i][2]=a[2];
         _hard[i][3]=0;
     }
     for (int i=0; i<80; i++) {
-        shuffle_array(a,3);
+        //shuffle_array(a,3);
+        shuffle(begin(a),end(a),rng);
         _soft[i][0]=a[0];
         _soft[i][1]=a[1];
         _soft[i][2]=a[2];
@@ -424,14 +449,16 @@ void Chromosome::populate() {
     }
     int b[]={1,0,0,0};
     for (int i=0; i<90; i++) {
-        shuffle_array(b,4);
+        //shuffle_array(b,4);
+        shuffle(begin(b),end(b),rng);
         _pairs[i][0]=b[0];
         _pairs[i][1]=b[1];
         _pairs[i][2]=b[2];
         _pairs[i][3]=b[3];
     }
     for (int i=0; i<10; i++) {
-        shuffle_array(b,4);
+        //shuffle_array(b,4);
+        shuffle(begin(b),end(b),rng);
         _acepairs[i][0]=b[0];
         _acepairs[i][1]=b[1];
         _acepairs[i][2]=b[2];
@@ -617,6 +644,8 @@ void Chromosome::display() {
     }
     cout << endl;
 
+    SetConsoleTextAttribute(hConsole,15);
+
     return;
 }
 
@@ -718,127 +747,271 @@ void transferbest() {
 }
 
 void makebest(int i) {
-    for (int j=0; j<41; j++) {
-        pop[i]._hard[j][0]=1;
+    for (int j=0;j<160;j++)
+    {
+        pop[i]._hard[j][0]=0;
         pop[i]._hard[j][1]=0;
         pop[i]._hard[j][2]=0;
         pop[i]._hard[j][3]=0;
     }
+    for (int j=0;j<80;j++)
+    {
+        pop[i]._soft[j][0]=0;
+        pop[i]._soft[j][1]=0;
+        pop[i]._soft[j][2]=0;
+        pop[i]._soft[j][3]=0;
+    }
+    for (int j=0;j<90;j++)
+    {
+        pop[i]._pairs[j][0]=0;
+        pop[i]._pairs[j][1]=0;
+        pop[i]._pairs[j][2]=0;
+        pop[i]._pairs[j][3]=0;
+    }
+    for (int j=0;j<10;j++)
+    {
+        pop[i]._acepairs[j][0]=0;
+        pop[i]._acepairs[j][1]=0;
+        pop[i]._acepairs[j][2]=0;
+        pop[i]._acepairs[j][3]=0;
+    }
+
+    for (int j=0; j<50; j++) {
+        pop[i]._hard[j][0]=1;
+    }
     for (int j=120; j<160; j++) {
-        pop[i]._hard[j][0]=0;
         pop[i]._hard[j][1]=1;
-        pop[i]._hard[j][2]=0;
-        pop[i]._hard[j][3]=0;
     }
     for (int j=80; j<120; j++) {
-        pop[i]._hard[j][2]=0;
-        pop[i]._hard[j][3]=0;
         if (0<(j%10) && (j%10)<6) {
-            pop[i]._hard[j][0]=0;
             pop[i]._hard[j][1]=1;
         }
         else {
             pop[i]._hard[j][0]=1;
-            pop[i]._hard[j][1]=0;
         }
+    }
+
+    pop[i]._hard[70][0]=1;
+    pop[i]._hard[71][0]=1;
+    pop[i]._hard[72][0]=1;
+    pop[i]._hard[73][1]=1;
+    pop[i]._hard[74][1]=1;
+    pop[i]._hard[75][1]=1;
+    pop[i]._hard[76][0]=1;
+    pop[i]._hard[77][0]=1;
+    pop[i]._hard[78][0]=1;
+    pop[i]._hard[79][0]=1;
+
+    for (int j=0;j<20;j++)
+    {
+        pop[i]._hard[j+50][2]=1;
+    }
+    pop[i]._hard[50][2]=0;
+    pop[i]._hard[50][0]=1;
+    pop[i]._hard[59][2]=0;
+    pop[i]._hard[59][0]=1;
+
+    pop[i]._hard[42][0]=0;
+    pop[i]._hard[42][2]=1;
+    pop[i]._hard[43][0]=0;
+    pop[i]._hard[43][2]=1;
+    pop[i]._hard[44][0]=0;
+    pop[i]._hard[44][2]=1;
+    pop[i]._hard[45][0]=0;
+    pop[i]._hard[45][2]=1;
+
+    for (int j=0;j<20;j++)
+    {
+        pop[i]._soft[60+j][1]=1;
+    }
+    pop[i]._soft[65][1]=0;
+    pop[i]._soft[65][2]=1;
+
+    for (int j=0;j<60;j++)
+    {
+        pop[i]._soft[j][0]=1;
+    }
+
+    int thing[]={51,52,53,54,55,42,43,44,45,33,34,35,23,24,25,14,15,4,5};
+    for (int j=0;j<19;j++)
+    {
+        pop[i]._soft[thing[j]][0]=0;
+        pop[i]._soft[thing[j]][2]=1;
+    }
+
+    pop[i]._soft[56][0]=0;
+    pop[i]._soft[56][1]=1;
+    pop[i]._soft[57][0]=0;
+    pop[i]._soft[57][1]=1;
+
+    for (int j=0;j<10;j++)
+    {
+        pop[i]._acepairs[j][3]=1;
+        pop[i]._pairs[j+80][1]=1;
+    }
+    for (int j=0;j<80;j++)
+    {
+        pop[i]._pairs[j][3]=1;
+    }
+    pop[i]._pairs[70][3]=0;
+    pop[i]._pairs[70][1]=1;
+    pop[i]._pairs[79][3]=0;
+    pop[i]._pairs[79][1]=1;
+    pop[i]._pairs[76][3]=0;
+    pop[i]._pairs[76][1]=1;
+
+    for (int j=31;j<39;j++)
+    {
+        pop[i]._pairs[j][3]=0;
+        pop[i]._pairs[j][2]=1;
+    }
+
+    int things2[]={50,57,58,59,40,46,47,48,49,30,39,20,21,22,23,26,27,28,29,10,19,18,17,0,9,8,7};
+    for (int j=0;j<27;j++)
+    {
+        pop[i]._pairs[things2[j]][3]=0;
+        pop[i]._pairs[things2[j]][0]=1;
+    }
+}
+
+void getfitness(int a,int b,bool show_progress)
+{
+    int progress=0;
+    for (int i=a;i<b;i++)
+    {
+        pop[i]._fitness=pop[i].test(trials);
+        if (show_progress && (i-a)>(b-a)*progress/10)
+        {
+            progress+=1;
+            cout << "+";
+        }
+    }
+    if (show_progress)
+    {
+        cout << endl;
     }
 }
 
 int main()
 {
-    srand(time(NULL));
-
     hConsole=GetStdHandle(STD_OUTPUT_HANDLE);
 
-    int bigtotal=0;
     int elitenum=std::floor(popsize*elitism);
 
-    for (int i=0; i<52*shoesize; i++) {
-        deck[i]=cards[i%13];
-    }
+    uniform_int_distribution<int> unibreed(0,1);
+    uniform_real_distribution<double> unimut(0.,1.);
 
-    int trinums[popsize-elitenum];
-    for (int i=1; i<=popsize-elitenum; i++) {
-        trinums[i-1]=i*(i+1)/2;
-        bigtotal+=trinums[i-1];
-    }
-
-    random_device rd;
-    mt19937 rng(rd());
-    uniform_int_distribution<int> uni(1,bigtotal);
-
+    int popindex[popsize]={};
     //initialise population.
     for (int i=0; i<popsize; i++) {
         pop[i].populate();
+        popindex[i]=i;
     }
 
     int gen=0;
     int totalgen=1000;
-    int a=0;
-    int r;
+    int ad=0;
+    int r=0;
     int p[2];
+    int tournysize=4;
+    double besttournyfitness=-999999.;
+    int tournyindex=0;
+
+    double m=0.;
+    int a[3]={1,0,0};
+    int b[4]={1,0,0,0};
 
     //best strategy.
     int topgen=0;
     topstrat._fitness=-100000000;
 
+    //multithreading.
+    const int threadcount=4;
+
+    array<thread,threadcount> threads;
+    array<int,threadcount+1> indices;
+
+    indices[0]=0;
+    indices[threadcount]=popsize;
+
+    for (int i=1;i<threadcount;i++)
+    {
+        indices[i]=int(popsize*i/threadcount);
+    }
+
     while (gen<totalgen) {
         gen=gen+1;
+        if (gen>50)
+        {
+            trials=500000;
+        }
 
         SetConsoleTextAttribute(hConsole,15);
 
         cout << "Generation: " << gen << endl;
 
-        int progress=0;
-
-        for (int i=0; i<popsize; i++) {
-            pop[i]._fitness=pop[i].test(trials);
-            if (i>popsize*progress/10) {
-                progress=progress+1;
-                cout << "+";
-            }
+        for (int i=0;i<threadcount-1;i++)
+        {
+            threads[i]=thread(getfitness,indices[i],indices[i+1],false);
         }
-        cout << endl;
+        threads[threadcount-1]=thread(getfitness,indices[threadcount-1],indices[threadcount],true);
+        for (int i=0;i<threadcount;i++)
+        {
+            threads[i].join();
+        }
+
         //sort pop in terms of _fitness.
         std::sort(pop,pop+popsize,comp);
 
         //show the best of the generation.
         cout << pop[popsize-1]._fitness << endl;
 
+        pop[popsize-1].display();
+
         if (pop[popsize-1]._fitness>topstrat._fitness) {
             topgen=gen;
             transferbest();
-            topstrat.display();
+            //topstrat.display();
             SetConsoleTextAttribute(hConsole,15);
         }
 
         //select individuals for crossover.
-        for (int i=0; i<popsize-elitenum; i++) {
-            for (int j=0; j<2; j++) {
-                a=0;
-                r=uni(rng);
-                for (int x=0; x<popsize-elitenum; x++) {
-                    a+=trinums[x];
-                    if (a>=r) {
-                        p[j]=x;
-                        break;
+        ad=0;
+        shuffle(begin(popindex),end(popindex),rng);
+        for (int i=0; i<popsize-elitenum; i++)
+        {
+            for (int j=0; j<2; j++)
+            {
+                //tournament selection.
+                besttournyfitness=-9999999.;
+                if (ad+tournysize>=popsize)
+                {
+                    ad=0;
+                    shuffle(begin(popindex),end(popindex),rng);
+                }
+                for (int k=ad;k<ad+tournysize;k++)
+                {
+                    if (pop[popindex[k]]._fitness>besttournyfitness)
+                    {
+                        besttournyfitness=pop[popindex[k]]._fitness;
+                        tournyindex=popindex[k];
                     }
                 }
+                ad+=tournysize;
+                p[j]=tournyindex;
             }
             //encode child and introduce mutations.
-            double m;
-            int a[3]={1,0,0};
-            int b[4]={1,0,0,0};
             for (int j=0; j<160; j++) {
-                r=rand()%2;
+                r=unibreed(rng);
                 newpop[i]._hard[j][0]=pop[p[r]]._hard[j][0];
                 newpop[i]._hard[j][1]=pop[p[r]]._hard[j][1];
                 newpop[i]._hard[j][2]=pop[p[r]]._hard[j][2];
                 newpop[i]._hard[j][3]=pop[p[r]]._hard[j][3];
 
-                m=((double) rand()/(RAND_MAX));
+                m=unimut(rng);
                 if (m<mutation) {
-                    shuffle_array(a,3);
+                    //shuffle_array(a,3);
+                    shuffle(begin(a),end(a),rng);
                     newpop[i]._hard[j][0]=a[0];
                     newpop[i]._hard[j][1]=a[1];
                     newpop[i]._hard[j][2]=a[2];
@@ -846,15 +1019,16 @@ int main()
                 }
             }
             for (int j=0; j<80; j++) {
-                r=rand()%2;
+                r=unibreed(rng);
                 newpop[i]._soft[j][0]=pop[p[r]]._soft[j][0];
                 newpop[i]._soft[j][1]=pop[p[r]]._soft[j][1];
                 newpop[i]._soft[j][2]=pop[p[r]]._soft[j][2];
                 newpop[i]._soft[j][3]=pop[p[r]]._soft[j][3];
 
-                m=((double) rand()/(RAND_MAX));
+                m=unimut(rng);
                 if (m<mutation) {
-                    shuffle_array(a,3);
+                    //shuffle_array(a,3);
+                    shuffle(begin(a),end(a),rng);
                     newpop[i]._soft[j][0]=a[0];
                     newpop[i]._soft[j][1]=a[1];
                     newpop[i]._soft[j][2]=a[2];
@@ -862,15 +1036,16 @@ int main()
                 }
             }
             for (int j=0; j<90; j++) {
-                r=rand()%2;
+                r=unibreed(rng);
                 newpop[i]._pairs[j][0]=pop[p[r]]._pairs[j][0];
                 newpop[i]._pairs[j][1]=pop[p[r]]._pairs[j][1];
                 newpop[i]._pairs[j][2]=pop[p[r]]._pairs[j][2];
                 newpop[i]._pairs[j][3]=pop[p[r]]._pairs[j][3];
 
-                m=((double) rand()/(RAND_MAX));
+                m=unimut(rng);
                 if (m<mutation) {
-                    shuffle_array(b,4);
+                    //shuffle_array(b,4);
+                    shuffle(begin(b),end(b),rng);
                     newpop[i]._pairs[j][0]=b[0];
                     newpop[i]._pairs[j][1]=b[1];
                     newpop[i]._pairs[j][2]=b[2];
@@ -878,15 +1053,16 @@ int main()
                 }
             }
             for (int j=0; j<10; j++) {
-                r=rand()%2;
+                r=unibreed(rng);
                 newpop[i]._acepairs[j][0]=pop[p[r]]._acepairs[j][0];
                 newpop[i]._acepairs[j][1]=pop[p[r]]._acepairs[j][1];
                 newpop[i]._acepairs[j][2]=pop[p[r]]._acepairs[j][2];
                 newpop[i]._acepairs[j][3]=pop[p[r]]._acepairs[j][3];
 
-                m=((double) rand()/(RAND_MAX));
+                m=unimut(rng);
                 if (m<mutation) {
-                    shuffle_array(b,4);
+                    //shuffle_array(b,4);
+                    shuffle(begin(b),end(b),rng);
                     newpop[i]._acepairs[j][0]=b[0];
                     newpop[i]._acepairs[j][1]=b[1];
                     newpop[i]._acepairs[j][2]=b[2];
@@ -898,36 +1074,6 @@ int main()
         for (int i=0; i<popsize-elitenum; i++) {
             transfer(i);
         }
-        for (int i=popsize-elitenum;i<popsize;i++)
-        {
-            for (int j=0; j<160; j++) {
-                newpop[i]._hard[j][0]=pop[i]._hard[j][0];
-                newpop[i]._hard[j][1]=pop[i]._hard[j][1];
-                newpop[i]._hard[j][2]=pop[i]._hard[j][2];
-                newpop[i]._hard[j][3]=pop[i]._hard[j][3];
-            }
-            for (int j=0; j<80; j++) {
-                newpop[i]._soft[j][0]=pop[i]._soft[j][0];
-                newpop[i]._soft[j][1]=pop[i]._soft[j][1];
-                newpop[i]._soft[j][2]=pop[i]._soft[j][2];
-                newpop[i]._soft[j][3]=pop[i]._soft[j][3];
-            }
-            for (int j=0; j<90; j++) {
-                newpop[i]._pairs[j][0]=pop[i]._pairs[j][0];
-                newpop[i]._pairs[j][1]=pop[i]._pairs[j][1];
-                newpop[i]._pairs[j][2]=pop[i]._pairs[j][2];
-                newpop[i]._pairs[j][3]=pop[i]._pairs[j][3];
-            }
-            for (int j=0; j<10; j++) {
-                newpop[i]._acepairs[j][0]=pop[i]._acepairs[j][0];
-                newpop[i]._acepairs[j][1]=pop[i]._acepairs[j][1];
-                newpop[i]._acepairs[j][2]=pop[i]._acepairs[j][2];
-                newpop[i]._acepairs[j][3]=pop[i]._acepairs[j][3];
-            }
-            transfer(i);
-        }
     }
-
-
     return 0;
 }

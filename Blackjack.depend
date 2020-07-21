@@ -1,9 +1,10 @@
 # depslib dependency file v1.0
-1595262532 source:c:\users\willi\onedrive\desktop\python\blackjack\blackjack\main.cpp
+1595368911 source:c:\users\willi\onedrive\desktop\python\blackjack\blackjack\main.cpp
 	<iostream>
 	<string>
 	<random>
 	<algorithm>
 	<windows.h>
 	<time.h>
+	<thread>
 
